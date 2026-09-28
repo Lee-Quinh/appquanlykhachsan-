@@ -3,7 +3,7 @@ Import sqlite3
 Import pandas as pd
 From datetime import datetime, date
 Import os
-st.image("IMG_20260928_114620.jpg")
+
 # =========================================================
 # CẤU HÌNH APP
 # =========================================================
