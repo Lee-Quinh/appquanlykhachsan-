@@ -1,1160 +1,500 @@
-Import streamlit as st
-Import sqlite3
-Import pandas as pd
-From datetime import datetime, date
-Import os
-
-# =========================================================
-# CẤU HÌNH APP
-# =========================================================
-
-St.set_page_config(
-    Page_title=”Hotel Room Management”,
-    Page_icon=””,
-    Layout=”wide”,
-    Initial_sidebar_state=”expanded”
+import os
+from datetime import datetime, date, timedelta
+import pandas as pd
+import streamlit as st
+import plotly.express as px
+st.i"12.
+# ---------------------------------------------------------
+# 1. CẤU HÌNH TRANG WEB STREAMLIT
+# ---------------------------------------------------------
+st.set_page_config(
+    page_title="Hệ Thống Quản Lý Khách Sạn (Hotel PMS)",
+    page_icon="🏨",
+    layout="wide",
+    initial_sidebar_state="expanded"
 )
 
-DB_FILE = “hotel.db”
+CSV_BOOKING = "booking_history.csv"
+CSV_ROOMS = "rooms_master.csv"
+CSV_GUESTS = "guests_master.csv"
+CSV_NOTICES = "internal_notices.csv"
 
+# ---------------------------------------------------------
+# 2. KHỞI TẠO DỮ LIỆU BỘ NHỚ (SESSION STATE & CSV)
+# ---------------------------------------------------------
+def init_data():
+    # Danh mục phòng mặc định
+    if "df_rooms" not in st.session_state:
+        if os.path.exists(CSV_ROOMS):
+            st.session_state.df_rooms = pd.read_csv(CSV_ROOMS)
+        else:
+            default_rooms = [
+                {"Phòng": "101", "Hạng": "Đơn Thường", "Giá": 300000, "Trạng thái": "Trống - Sạch", "Bảo trì": False, "Lỗi bảo trì": "", "Ghi chú": ""},
+                {"Phòng": "102", "Hạng": "Đơn Thường", "Giá": 300000, "Trạng thái": "Trống - Sạch", "Bảo trì": False, "Lỗi bảo trì": "", "Ghi chú": ""},
+                {"Phòng": "201", "Hạng": "Đôi Thường", "Giá": 450000, "Trạng thái": "Cần dọn (Dirty)", "Bảo trì": False, "Lỗi bảo trì": "", "Ghi chú": ""},
+                {"Phòng": "202", "Hạng": "Đôi Thường", "Giá": 450000, "Trạng thái": "Đang ở", "Bảo trì": False, "Lỗi bảo trì": "", "Ghi chú": ""},
+                {"Phòng": "301", "Hạng": "VIP Đơn", "Giá": 600000, "Trạng thái": "Khóa bảo trì", "Bảo trì": True, "Lỗi bảo trì": "Hư hỏng máy lạnh", "Ghi chú": ""},
+                {"Phòng": "302", "Hạng": "VIP Đôi", "Giá": 800000, "Trạng thái": "Đã kiểm tra (Inspected)", "Bảo trì": False, "Lỗi bảo trì": "", "Ghi chú": ""},
+                {"Phòng": "401", "Hạng": "President", "Giá": 1500000, "Trạng thái": "Trống - Sạch", "Bảo trì": False, "Lỗi bảo trì": "", "Ghi chú": ""},
+            ]
+            st.session_state.df_rooms = pd.DataFrame(default_rooms)
 
-# =========================================================
-# DATABASE
-# =========================================================
+    # Lịch sử đặt phòng & Check-in
+    if "df_bookings" not in st.session_state:
+        if os.path.exists(CSV_BOOKING):
+            st.session_state.df_bookings = pd.read_csv(CSV_BOOKING)
+        else:
+            default_bookings = [
+                {
+                    "Mã Đặt": "BK001", "Khách hàng": "Nguyễn Văn Anh", "CCCD/Passport": "0123456789",
+                    "SĐT": "0901234567", "Loại khách": "VIP", "Phòng": "202", "Nguồn đặt": "Booking.com",
+                    "Ngày Check-in": "2026-09-28", "Ngày Check-out": "2026-09-30", "Số đêm": 2,
+                    "Tiền phòng": 900000, "Tiền Dịch vụ": 150000, "Tiền Cọc": 300000, "Tổng cộng": 1050000,
+                    "Trạng thái BK": "Đang ở", "PT Thanh toán": "Chuyển khoản", "Ghi chú khách": "Gối lông vũ, tầng cao"
+                }
+            ]
+            st.session_state.df_bookings = pd.DataFrame(default_bookings)
 
-Def get_connection():
-    Conn = sqlite3.connect(DB_FILE, check_same_thread=False)
-    Conn.row_factory = sqlite3.Row
-    Return conn
+    # Hồ sơ khách hàng
+    if "df_guests" not in st.session_state:
+        if os.path.exists(CSV_GUESTS):
+            st.session_state.df_guests = pd.read_csv(CSV_GUESTS)
+        else:
+            default_guests = [
+                {"CCCD/Passport": "0123456789", "Tên": "Nguyễn Văn Anh", "SĐT": "0901234567", "Loại khách": "VIP", "Sở thích/Yêu cầu": "Gối lông vũ, phòng yên tĩnh", "Số lần lưu trú": 3}
+            ]
+            st.session_state.df_guests = pd.DataFrame(default_guests)
 
+    # Thông báo nội bộ
+    if "df_notices" not in st.session_state:
+        if os.path.exists(CSV_NOTICES):
+            st.session_state.df_notices = pd.read_csv(CSV_NOTICES)
+        else:
+            st.session_state.df_notices = pd.DataFrame(columns=["Thời gian", "Từ bộ phận", "Đến bộ phận", "Nội dung", "Đã xử lý"])
 
-Def init_database():
-    Conn = get_connection()
-    Cursor = conn.cursor()
+init_data()
 
-    # Bảng phòng
-    Cursor.execute(“””
-        CREATE TABLE IF NOT EXISTS rooms (
-            Id INTEGER PRIMARY KEY AUTOINCREMENT,
-            Room_number TEXT UNIQUE NOT NULL,
-            Room_type TEXT NOT NULL,
-            Floor INTEGER NOT NULL,
-            Price REAL NOT NULL,
-            Status TEXT NOT NULL DEFAULT ‘Trống’,
-            Note TEXT DEFAULT ‘’
-        )
-    “””)
+def save_all_data():
+    st.session_state.df_rooms.to_csv(CSV_ROOMS, index=False)
+    st.session_state.df_bookings.to_csv(CSV_BOOKING, index=False)
+    st.session_state.df_guests.to_csv(CSV_GUESTS, index=False)
+    st.session_state.df_notices.to_csv(CSV_NOTICES, index=False)
 
-    # Bảng đặt phòng
-    Cursor.execute(“””
-        CREATE TABLE IF NOT EXISTS bookings (
-            Id INTEGER PRIMARY KEY AUTOINCREMENT,
-            Guest_name TEXT NOT NULL,
-            Phone TEXT,
-            Room_number TEXT NOT NULL,
-            Room_type TEXT,
-            Check_in TEXT NOT NULL,
-            Check_out TEXT NOT NULL,
-            Guests INTEGER DEFAULT 1,
-            Price_per_night REAL DEFAULT 0,
-            Total_amount REAL DEFAULT 0,
-            Status TEXT DEFAULT ‘Đã đặt’,
-            Created_at TEXT
-        )
-    “””)
+# ---------------------------------------------------------
+# 3. SIDEBAR & ĐĂNG NHẬP PHÂN QUYỀN (ROLES)
+# ---------------------------------------------------------
+st.sidebar.title("🏨 HOTEL PMS SYSTEM")
+role = st.sidebar.selectbox("👤 Vai trò làm việc:", ["Lễ Tân (Front Office)", "Buồng Phòng (Housekeeping)", "Bảo Trì (Engineering)", "Quản Lý (Manager / Admin)"])
 
-    # Bảng lịch sử
-    Cursor.execute(“””
-        CREATE TABLE IF NOT EXISTS history (
-            Id INTEGER PRIMARY KEY AUTOINCREMENT,
-            Room_number TEXT,
-            Action TEXT,
-            Guest_name TEXT,
-            Amount REAL DEFAULT 0,
-            Action_time TEXT
-        )
-    “””)
-
-    # Nếu chưa có phòng thì tạo dữ liệu mẫu
-    Cursor.execute(“SELECT COUNT(*) FROM rooms”)
-    Room_count = cursor.fetchone()[0]
-
-    If room_count == 0:
-        Rooms = [
-            (“101”, “Standard”, 1, 650000, “Trống”, “”),
-            (“102”, “Standard”, 1, 650000, “Trống”, “”),
-            (“103”, “Standard”, 1, 650000, “Trống”, “”),
-            (“104”, “Standard”, 1, 650000, “Trống”, “”),
-            (“201”, “Deluxe”, 2, 850000, “Trống”, “”),
-            (“202”, “Deluxe”, 2, 850000, “Trống”, “”),
-            (“203”, “Deluxe”, 2, 850000, “Trống”, “”),
-            (“204”, “Deluxe”, 2, 850000, “Trống”, “”),
-            (“301”, “Superior”, 3, 1000000, “Trống”, “”),
-            (“302”, “Superior”, 3, 1000000, “Trống”, “”),
-            (“303”, “Superior”, 3, 1000000, “Trống”, “”),
-            (“304”, “Superior”, 3, 1000000, “Trống”, “”),
-            (“401”, “Suite”, 4, 1500000, “Trống”, “”),
-            (“402”, “Suite”, 4, 1500000, “Trống”, “”),
-            (“501”, “VIP”, 5, 2500000, “Trống”, “”),
-            (“502”, “VIP”, 5, 2500000, “Trống”, “”),
-        ]
-
-        Cursor.executemany(“””
-            INSERT INTO rooms
-            (room_number, room_type, floor, price, status, note)
-            VALUES (?, ?, ?, ?, ?, ?)
-        “””, rooms)
-
-    Conn.commit()
-    Conn.close()
-
-
-Init_database()
-
-
-# =========================================================
-# HÀM DATABASE
-# =========================================================
-
-Def query_df(query, params=()):
-    Conn = get_connection()
-    Df = pd.read_sql_query(query, conn, params=params)
-    Conn.close()
-    Return df
-
-
-Def execute_query(query, params=()):
-    Conn = get_connection()
-    Cursor = conn.cursor()
-    Cursor.execute(query, params)
-    Conn.commit()
-    Last_id = cursor.lastrowid
-    Conn.close()
-    Return last_id
-
-
-Def get_room(room_number):
-    Conn = get_connection()
-    Cursor = conn.cursor()
-    Cursor.execute(
-        “SELECT * FROM rooms WHERE room_number = ?”,
-        (room_number,)
-    )
-    Room = cursor.fetchone()
-    Conn.close()
-    Return room
-
-
-Def update_room_status(room_number, status):
-    Execute_query(
-        “UPDATE rooms SET status = ? WHERE room_number = ?”,
-        (status, room_number)
-    )
-
-
-Def add_history(room_number, action, guest_name=””, amount=0):
-    Execute_query(“””
-        INSERT INTO history
-        (room_number, action, guest_name, amount, action_time)
-        VALUES (?, ?, ?, ?, ?)
-    “””, (
-        Room_number,
-        Action,
-        Guest_name,
-        Amount,
-        Datetime.now().strftime(“%Y-%m-%d %H:%M:%S”)
-    ))
-
-
-# =========================================================
-# FORMAT TIỀN
-# =========================================================
-
-Def format_money(value):
-    Return f”{value:,.0f} VNĐ”
-
-
-# =========================================================
-# SIDEBAR
-# =========================================================
-
-St.sidebar.title(“ HOTEL MANAGER”)
-St.sidebar.caption(“Hệ thống quản lý phòng khách sạn”)
-
-Menu = st.sidebar.radio(
-    “MENU”,
+page = st.sidebar.radio(
+    "📍 Điều hướng chức năng:",
     [
-        “ Tổng quan”,
-        “️ Quản lý phòng”,
-        “ Đặt phòng”,
-        “ Check-in”,
-        “ Check-out”,
-        “ Bảo trì phòng”,
-        “ Lịch sử”
+        "1. Sơ Đồ & Quản Lý Phòng",
+        "2. Đặt Phòng & OTA",
+        "3. Check-in / Check-out & Thanh Toán",
+        "4. Quản Lý Khách Hàng",
+        "5. Buồng Phòng (Housekeeping)",
+        "6. Quản Lý Bảo Trì",
+        "7. Báo Cáo & Thống Kê KPI",
+        "8. Thông Báo Nội Bộ"
     ]
 )
 
-St.sidebar.divider()
-
-St.sidebar.info(
-    “ Hệ thống sử dụng SQLite nên dữ liệu sẽ được lưu “
-    “trong file hotel.db ngay tại thư mục chạy app.”
-)
-
-
-# =========================================================
-# CSS
-# =========================================================
-
-St.markdown(“””
-<style>
-    .main-title {
-        Font-size: 32px;
-        Font-weight: 700;
-        Margin-bottom: 5px;
-    }
-
-    .sub-title {
-        Color: #666;
-        Margin-bottom: 25px;
-    }
-
-    Div[data-testid=”stMetric”] {
-        Border: 1px solid #e5e5e5;
-        Border-radius: 12px;
-        Padding: 15px;
-        Background-color: #fafafa;
-    }
-
-    .room-card {
-        Border: 1px solid #ddd;
-        Border-radius: 12px;
-        Padding: 15px;
-        Margin-bottom: 10px;
-        Background-color: #ffffff;
-    }
-
-    .status {
-        Font-weight: bold;
-    }
-
-    .footer {
-        Text-align: center;
-        Color: #888;
-        Margin-top: 40px;
-        Padding: 20px;
-    }
-</style>
-“””, unsafe_allow_html=True)
-
-
-# =========================================================
-# 1. DASHBOARD
-# =========================================================
-
-If menu == “ Tổng quan”:
-
-    St.markdown(
-        ‘<div class=”main-title”> Tổng quan khách sạn</div>’,
-        Unsafe_allow_html=True
-    )
-
-    St.markdown(
-        ‘<div class=”sub-title”>Theo dõi tình trạng phòng và hoạt động kinh doanh</div>’,
-        Unsafe_allow_html=True
-    )
-
-    Rooms_df = query_df(“SELECT * FROM rooms”)
-    Bookings_df = query_df(“SELECT * FROM bookings”)
-
-    Total_rooms = len(rooms_df)
-
-    Available_rooms = len(
-        Rooms_df[rooms_df[“status”] == “Trống”]
-    )
-
-    Occupied_rooms = len(
-        Rooms_df[rooms_df[“status”] == “Đang ở”]
-    )
-
-    Reserved_rooms = len(
-        Rooms_df[rooms_df[“status”] == “Đã đặt”]
-    )
-
-    Maintenance_rooms = len(
-        Rooms_df[rooms_df[“status”] == “Bảo trì”]
-    )
-
-    Revenue = bookings_df[
-        Bookings_df[“status”] == “Đã trả phòng”
-    ][“total_amount”].sum()
-
-    Col1, col2, col3, col4 = st.columns(4)
-
-    Col1.metric(“ Tổng phòng”, total_rooms)
-    Col2.metric(“🟢 Phòng trống”, available_rooms)
-    Col3.metric(“🔴 Đang có khách”, occupied_rooms)
-    Col4.metric(“🟡 Đã đặt”, reserved_rooms)
-
-    St.divider()
-
-    Col1, col2, col3 = st.columns(3)
-
-    Col1.metric(“ Bảo trì”, maintenance_rooms)
-    Col2.metric(“ Doanh thu đã thu”, format_money(revenue))
-    Col3.metric(
-        “ Công suất phòng”,
-        F”{(occupied_rooms / total_rooms * 100):.1f}%”
-        If total_rooms > 0 else “0%”
-    )
-
-    St.divider()
-
-    St.subheader(“️ Tình trạng phòng”)
-
-    Status_count = rooms_df[“status”].value_counts()
-
-    Col1, col2 = st.columns(2)
-
-    With col1:
-        St.bar_chart(status_count)
-
-    With col2:
-        Status_table = pd.DataFrame({
-            “Trạng thái”: status_count.index,
-            “Số phòng”: status_count.values
-        })
-
-        St.dataframe(
-            Status_table,
-            Use_container_width=True,
-            Hide_index=True
-        )
-
-    St.subheader(“ Các booking gần đây”)
-
-    Recent_bookings = query_df(“””
-        SELECT
-            Id AS ‘Mã’,
-            Guest_name AS ‘Khách hàng’,
-            Phone AS ‘SĐT’,
-            Room_number AS ‘Phòng’,
-            Check_in AS ‘Check-in’,
-            Check_out AS ‘Check-out’,
-            Total_amount AS ‘Tổng tiền’,
-            Status AS ‘Trạng thái’
-        FROM bookings
-        ORDER BY id DESC
-        LIMIT 10
-    “””)
-
-    If len(recent_bookings) > 0:
-        St.dataframe(
-            Recent_bookings,
-            Use_container_width=True,
-            Hide_index=True
-        )
-    Else:
-        St.info(“Chưa có booking nào.”)
-
-
-# =========================================================
-# 2. QUẢN LÝ PHÒNG
-# =========================================================
-
-Elif menu == “️ Quản lý phòng”:
-
-    St.markdown(
-        ‘<div class=”main-title”>️ Quản lý phòng</div>’,
-        Unsafe_allow_html=True
-    )
-
-    Rooms_df = query_df(“SELECT * FROM rooms ORDER BY floor, room_number”)
-
-    Col1, col2, col3 = st.columns(3)
-
-    With col1:
-        Search = st.text_input(
-            “ Tìm phòng”,
-            Placeholder=”Nhập số phòng...”
-        )
-
-    With col2:
-        Status_filter = st.selectbox(
-            “Trạng thái”,
-            [
-                “Tất cả”,
-                “Trống”,
-                “Đã đặt”,
-                “Đang ở”,
-                “Bảo trì”,
-                “Đang dọn”
-            ]
-        )
-
-    With col3:
-        Type_filter = st.selectbox(
-            “Loại phòng”,
-            [“Tất cả”] + sorted(rooms_df[“room_type”].unique().tolist())
-        )
-
-    Filtered = rooms_df.copy()
-
-    If search:
-        Filtered = filtered[
-            Filtered[“room_number”]
-            .astype(str)
-            .str.contains(search, case=False)
-        ]
-
-    If status_filter != “Tất cả”:
-        Filtered = filtered[
-            Filtered[“status”] == status_filter
-        ]
-
-    If type_filter != “Tất cả”:
-        Filtered = filtered[
-            Filtered[“room_type”] == type_filter
-        ]
-
-    St.write(f”**Hiển thị {len(filtered)} phòng**”)
-
-    # Hiển thị từng phòng
-    For _, room in filtered.iterrows():
-
-        Col1, col2, col3, col4, col5 = st.columns(
-            [1, 1.5, 1, 1.5, 2]
-        )
-
-        Col1.write(f”### ️ {room[‘room_number’]}”)
-        Col2.write(f”**{room[‘room_type’]}**”)
-        Col3.write(f”Tầng {room[‘floor’]}”)
-        Col4.write(format_money(room[“price”]))
-
-        With col5:
-
-            Status_options = [
-                “Trống”,
-                “Đã đặt”,
-                “Đang ở”,
-                “Bảo trì”,
-                “Đang dọn”
-            ]
-
-            Current_index = (
-                Status_options.index(room[“status”])
-                If room[“status”] in status_options
-                Else 0
-            )
-
-            New_status = st.selectbox(
-                “Trạng thái”,
-                Status_options,
-                Index=current_index,
-                Key=f”status_{room[‘room_number’]}”
-            )
-
-            If new_status != room[“status”]:
-
-                Update_room_status(
-                    Room[“room_number”],
-                    New_status
-                )
-
-                Add_history(
-                    Room[“room_number”],
-                    F”Cập nhật trạng thái: {room[‘status’]} → {new_status}”
-                )
-
-                St.success(
-                    F”Phòng {room[‘room_number’]} đã được cập nhật.”
-                )
-
-                St.rerun()
-
-        St.divider()
-
-    St.subheader(“➕ Thêm phòng mới”)
-
-    With st.form(“add_room_form”):
-
-        Col1, col2, col3 = st.columns(3)
-
-        With col1:
-            Room_number = st.text_input(
-                “Số phòng”,
-                Placeholder=”Ví dụ: 601”
-            )
-
-        With col2:
-            Room_type = st.selectbox(
-                “Loại phòng”,
-                [
-                    “Standard”,
-                    “Superior”,
-                    “Deluxe”,
-                    “Suite”,
-                    “VIP”
-                ]
-            )
-
-        With col3:
-            Floor = st.number_input(
-                “Tầng”,
-                Min_value=1,
-                Max_value=50,
-                Value=1
-            )
-
-        Col1, col2 = st.columns(2)
-
-        With col1:
-            Price = st.number_input(
-                “Giá phòng / đêm”,
-                Min_value=0,
-                Value=650000,
-                Step=50000
-            )
-
-        With col2:
-            Note = st.text_input(“Ghi chú”)
-
-        Submitted = st.form_submit_button(
-            “➕ Thêm phòng”,
-            Use_container_width=True
-        )
-
-        If submitted:
-
-            If not room_number.strip():
-                St.error(“Vui lòng nhập số phòng.”)
-
-            Elif get_room(room_number.strip()):
-                St.error(“Số phòng này đã tồn tại.”)
-
-            Else:
-
-                Execute_query(“””
-                    INSERT INTO rooms
-                    (room_number, room_type, floor, price, status, note)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                “””, (
-                    Room_number.strip(),
-                    Room_type,
-                    Floor,
-                    Price,
-                    “Trống”,
-                    Note
-                ))
-
-                St.success(
-                    F”Đã thêm phòng {room_number}.”
-                )
-
-                St.rerun()
-
-
-# =========================================================
-# 3. ĐẶT PHÒNG
-# =========================================================
-
-Elif menu == “ Đặt phòng”:
-
-    St.markdown(
-        ‘<div class=”main-title”> Đặt phòng</div>’,
-        Unsafe_allow_html=True
-    )
-
-    Rooms_df = query_df(“””
-        SELECT *
-        FROM rooms
-        WHERE status = ‘Trống’
-        ORDER BY room_number
-    “””)
-
-    If len(rooms_df) == 0:
-
-        St.warning(“Hiện không có phòng trống.”)
-
-    Else:
-
-        With st.form(“booking_form”):
-
-            St.subheader(“ Thông tin khách hàng”)
-
-            Col1, col2 = st.columns(2)
-
-            With col1:
-                Guest_name = st.text_input(
-                    “Họ và tên khách *”
-                )
-
-            With col2:
-                Phone = st.text_input(
-                    “Số điện thoại”
-                )
-
-            Col1, col2 = st.columns(2)
-
-            With col1:
-                Room_number = st.selectbox(
-                    “Chọn phòng”,
-                    Rooms_df[“room_number”].tolist()
-                )
-
-            With col2:
-                Guests = st.number_input(
-                    “Số khách”,
-                    Min_value=1,
-                    Max_value=20,
-                    Value=1
-                )
-
-            Col1, col2 = st.columns(2)
-
-            With col1:
-                Check_in = st.date_input(
-                    “Ngày check-in”,
-                    Value=date.today()
-                )
-
-            With col2:
-                Check_out = st.date_input(
-                    “Ngày check-out”,
-                    Value=date.today()
-                )
-
-            Selected_room = get_room(room_number)
-
-            Price_per_night = selected_room[“price”]
-
-            If check_out > check_in:
-                Nights = (check_out – check_in).days
-            Else:
-                Nights = 0
-
-            Total_amount = price_per_night * nights
-
-            St.info(
-                F”Giá phòng: **{format_money(price_per_night)} / đêm**  \n”
-                F”Số đêm: **{nights}**  \n”
-                F”Tổng tiền dự kiến: **{format_money(total_amount)}**”
-            )
-
-            Submitted = st.form_submit_button(
-                “ Xác nhận đặt phòng”,
-                Use_container_width=True
-            )
-
-            If submitted:
-
-                If not guest_name.strip():
-                    St.error(“Vui lòng nhập tên khách.”)
-
-                Elif check_out <= check_in:
-                    St.error(
-                        “Ngày check-out phải sau ngày check-in.”
+st.sidebar.markdown("---")
+st.sidebar.info(f"**Đang làm việc:** {role}\n\n📅 Ngày hệ thống: {date.today().strftime('%d/%m/%Y')}")
+
+# ---------------------------------------------------------
+# MODULE 1: SƠ ĐỒ & QUẢN LÝ PHÒNG
+# ---------------------------------------------------------
+if page == "1. Sơ Đồ & Quản Lý Phòng":
+    st.title("🛏️ Sơ Đồ Phòng Realtime & Quản Lý Trạng Thái")
+
+    df_r = st.session_state.df_rooms
+
+    # Thống kê nhanh trạng thái
+    c1, c2, c3, c4, c5 = st.columns(5)
+    c1.metric("🟢 Trống - Sạch", len(df_r[df_r["Trạng thái"] == "Trống - Sạch"]))
+    c2.metric("🔴 Đang có khách", len(df_r[df_r["Trạng thái"] == "Đang ở"]))
+    c3.metric("🧹 Cần dọn (Dirty)", len(df_r[df_r["Trạng thái"] == "Cần dọn (Dirty)"]))
+    c4.metric("✨ Đã kiểm tra", len(df_r[df_r["Trạng thái"] == "Đã kiểm tra (Inspected)"]))
+    c5.metric("🛠️ Khóa bảo trì", len(df_r[df_r["Bảo trì"] == True]))
+
+    st.markdown("---")
+    st.subheader("📌 Sơ đồ các phòng khách sạn")
+
+    cols = st.columns(4)
+    for idx, row in df_r.iterrows():
+        with cols[idx % 4]:
+            bg_color = "#d4edda" if row["Trạng thái"] == "Trống - Sạch" else (
+                "#f8d7da" if row["Trạng thái"] == "Cần dọn (Dirty)" else (
+                    "#cce5ff" if row["Trạng thái"] == "Đang ở" else (
+                        "#fff3cd" if row["Trạng thái"] == "Đã kiểm tra (Inspected)" else "#e2e3e5"
                     )
+                )
+            )
+            st.markdown(f"""
+            <div style="background-color: {bg_color}; padding: 15px; border-radius: 8px; margin-bottom: 15px; border: 1px solid #ccc;">
+                <h4>Phòng {row['Phòng']} ({row['Hạng']})</h4>
+                <p><b>Trạng thái:</b> {row['Trạng thái']}</p>
+                <p><b>Giá:</b> {row['Giá']:,} VNĐ/đêm</p>
+                <p><b>Bảo trì:</b> {'🔴 Đang khóa' if row['Bảo trì'] else '🟢 Bình thường'}</p>
+            </div>
+            """, unsafe_allow_html=True)
 
-                Else:
+    st.markdown("---")
+    col_left, col_right = st.columns(2)
 
-                    Execute_query(“””
-                        INSERT INTO bookings
-                        (
-                            Guest_name,
-                            Phone,
-                            Room_number,
-                            Room_type,
-                            Check_in,
-                            Check_out,
-                            Guests,
-                            Price_per_night,
-                            Total_amount,
-                            Status,
-                            Created_at
-                        )
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    “””, (
-                        Guest_name,
-                        Phone,
-                        Room_number,
-                        Selected_room[“room_type”],
-                        Str(check_in),
-                        Str(check_out),
-                        Guests,
-                        Price_per_night,
-                        Total_amount,
-                        “Đã đặt”,
-                        Datetime.now().strftime(“%Y-%m-%d %H:%M:%S”)
-                    ))
+    with col_left:
+        st.subheader("🔄 Chuyển phòng cho khách")
+        room_from = st.selectbox("Từ phòng (đang ở):", df_r[df_r["Trạng thái"] == "Đang ở"]["Phòng"].tolist())
+        room_to = st.selectbox("Chuyển sang phòng trống:", df_r[df_r["Trạng thái"] == "Trống - Sạch"]["Phòng"].tolist())
+        reason = st.text_input("Lý do chuyển phòng:")
 
-                    Update_room_status(
-                        Room_number,
-                        “Đã đặt”
-                    )
+        if st.button("Xác nhận chuyển phòng"):
+            if room_from and room_to:
+                # Cập nhật trạng thái
+                st.session_state.df_rooms.loc[st.session_state.df_rooms["Phòng"] == room_from, "Trạng thái"] = "Cần dọn (Dirty)"
+                st.session_state.df_rooms.loc[st.session_state.df_rooms["Phòng"] == room_to, "Trạng thái"] = "Đang ở"
 
-                    Add_history(
-                        Room_number,
-                        “Đặt phòng”,
-                        Guest_name,
-                        Total_amount
-                    )
+                # Cập nhật lịch sử đặt phòng
+                st.session_state.df_bookings.loc[
+                    (st.session_state.df_bookings["Phòng"] == room_from) & (st.session_state.df_bookings["Trạng thái BK"] == "Đang ở"), "Phòng"
+                ] = room_to
 
-                    St.success(
-                        F”Đặt phòng {room_number} thành công!”
-                    )
+                save_all_data()
+                st.success(f"Đã chuyển khách từ phòng {room_from} sang phòng {room_to}!")
+                st.rerun()
 
-                    St.rerun()
+    with col_right:
+        st.subheader("⚙️ Cập nhật thông tin / Giá phòng")
+        selected_r = st.selectbox("Chọn phòng điều chỉnh:", df_r["Phòng"].tolist())
+        r_info = df_r[df_r["Phòng"] == selected_r].iloc[0]
+        new_price = st.number_input("Giá phòng mới (VNĐ):", value=int(r_info["Giá"]), step=50000)
+        new_status = st.selectbox("Trạng thái phòng:", ["Trống - Sạch", "Cần dọn (Dirty)", "Đang dọn (Cleaning)", "Đã kiểm tra (Inspected)", "Đang ở"], index=0)
 
-    St.divider()
+        if st.button("Lưu thay đổi thông tin"):
+            st.session_state.df_rooms.loc[st.session_state.df_rooms["Phòng"] == selected_r, "Giá"] = new_price
+            st.session_state.df_rooms.loc[st.session_state.df_rooms["Phòng"] == selected_r, "Trạng thái"] = new_status
+            save_all_data()
+            st.success("Đã cập nhật thông tin phòng thành công!")
+            st.rerun()
 
-    St.subheader(“ Danh sách đặt phòng”)
+# ---------------------------------------------------------
+# MODULE 2: ĐẶT PHÒNG & QUẢN LÝ OTA
+# ---------------------------------------------------------
+elif page == "2. Đặt Phòng & OTA":
+    st.title("📅 Quản Lý Đặt Phòng & Đồng Bộ OTA")
 
-    Bookings = query_df(“””
-        SELECT
-            Id AS ‘Mã booking’,
-            Guest_name AS ‘Khách’,
-            Phone AS ‘SĐT’,
-            Room_number AS ‘Phòng’,
-            Check_in AS ‘Check-in’,
-            Check_out AS ‘Check-out’,
-            Guests AS ‘Số khách’,
-            Total_amount AS ‘Tổng tiền’,
-            Status AS ‘Trạng thái’
-        FROM bookings
-        WHERE status = ‘Đã đặt’
-        ORDER BY check_in
-    “””)
+    tab_create, tab_list = st.tabs(["➕ Tạo Booking Mới / Đồng bộ OTA", "📋 Danh Sách Booking"])
 
-    If len(bookings) > 0:
+    with tab_create:
+        col1, col2 = st.columns(2)
+        with col1:
+            guest_name = st.text_input("Tên khách hàng:")
+            guest_id = st.text_input("Số CCCD / Passport:")
+            guest_phone = st.text_input("Số điện thoại:")
+            guest_type = st.selectbox("Phân loại khách:", ["Khách lẻ", "Khách quen", "Đoàn", "VIP"])
+            source = st.selectbox("Nguồn đặt phòng (Channel):", ["Trực tiếp / Hotline", "Booking.com", "Agoda", "Traveloka", "Expedia"])
 
-        St.dataframe(
-            Bookings,
-            Use_container_width=True,
-            Hide_index=True
-        )
+        with col2:
+            available_rooms = st.session_state.df_rooms[st.session_state.df_rooms["Bảo trì"] == False]["Phòng"].tolist()
+            room_sel = st.selectbox("Chọn phòng khả dụng:", available_rooms)
+            cin = st.date_input("Ngày Check-in:", date.today())
+            cout = st.date_input("Ngày Check-out:", date.today() + timedelta(days=1))
+            deposit = st.number_input("Đặt cọc trước (VNĐ):", min_value=0, step=100000)
+            notes = st.text_area("Yêu cầu đặc biệt / Ghi chú:")
 
-    Else:
-        St.info(“Chưa có booking sắp tới.”)
+        if st.button("💾 Xác Nhận Tạo Booking"):
+            if guest_name and room_sel:
+                num_nights = (cout - cin).days
+                if num_nights <= 0:
+                    st.error("Ngày check-out phải sau ngày check-in!")
+                else:
+                    room_price = st.session_state.df_rooms[st.session_state.df_rooms["Phòng"] == room_sel]["Giá"].values[0]
+                    room_total = room_price * num_nights
+                    bk_code = f"BK{len(st.session_state.df_bookings)+1:03d}"
 
+                    new_bk = {
+                        "Mã Đặt": bk_code, "Khách hàng": guest_name, "CCCD/Passport": guest_id,
+                        "SĐT": guest_phone, "Loại khách": guest_type, "Phòng": room_sel, "Nguồn đặt": source,
+                        "Ngày Check-in": str(cin), "Ngày Check-out": str(cout), "Số đêm": num_nights,
+                        "Tiền phòng": room_total, "Tiền Dịch vụ": 0, "Tiền Cọc": deposit, "Tổng cộng": room_total,
+                        "Trạng thái BK": "Đã xác nhận", "PT Thanh toán": "Chưa thanh toán", "Ghi chú khách": notes
+                    }
+                    st.session_state.df_bookings = pd.concat([st.session_state.df_bookings, pd.DataFrame([new_bk])], ignore_index=True)
 
-# =========================================================
-# 4. CHECK-IN
-# =========================================================
+                    # Lưu hồ sơ khách
+                    if guest_id not in st.session_state.df_guests["CCCD/Passport"].values:
+                        new_g = {"CCCD/Passport": guest_id, "Tên": guest_name, "SĐT": guest_phone, "Loại khách": guest_type, "Sở thích/Yêu cầu": notes, "Số lần lưu trú": 1}
+                        st.session_state.df_guests = pd.concat([st.session_state.df_guests, pd.DataFrame([new_g])], ignore_index=True)
 
-Elif menu == “ Check-in”:
+                    save_all_data()
+                    st.success(f"Tạo thành công mã đặt phòng {bk_code}!")
+                    st.rerun()
 
-    St.markdown(
-        ‘<div class=”main-title”> Check-in</div>’,
-        Unsafe_allow_html=True
-    )
+    with tab_list:
+        st.dataframe(st.session_state.df_bookings, use_container_width=True)
 
-    Bookings = query_df(“””
-        SELECT *
-        FROM bookings
-        WHERE status = ‘Đã đặt’
-        ORDER BY check_in
-    “””)
+# ---------------------------------------------------------
+# MODULE 3: CHECK-IN / CHECK-OUT & THANH TOÁN
+# ---------------------------------------------------------
+elif page == "3. Check-in / Check-out & Thanh Toán":
+    st.title("🗝️ Thủ Tục Check-in / Check-out & Hóa Đơn")
 
-    If len(bookings) == 0:
+    tab_in, tab_out = st.tabs(["🔑 Check-in (Nhận Phòng)", "💳 Check-out & Thanh Toán"])
 
-        St.info(“Không có booking nào đang chờ check-in.”)
+    with tab_in:
+        st.subheader("Danh sách Booking chờ Check-in hôm nay")
+        pending_bk = st.session_state.df_bookings[st.session_state.df_bookings["Trạng thái BK"] == "Đã xác nhận"]
 
-    Else:
+        if not pending_bk.empty:
+            st.dataframe(pending_bk[["Mã Đặt", "Khách hàng", "Phòng", "Ngày Check-in", "Nguồn đặt"]], use_container_width=True)
+            selected_bk = st.selectbox("Chọn Mã Đặt để Check-in:", pending_bk["Mã Đặt"].tolist())
 
-        Booking_options = {
-            F”#{row[‘id’]} – {row[‘guest_name’]} – Phòng {row[‘room_number’]}”:
-            Row[“id”]
-            For _, row in bookings.iterrows()
+            if st.button("🚀 Thực Hiện Check-in"):
+                bk_row = pending_bk[pending_bk["Mã Đặt"] == selected_bk].iloc[0]
+                room_num = bk_row["Phòng"]
+
+                # Kiểm tra phòng có đang bị khóa bảo trì không
+                is_maint = st.session_state.df_rooms[st.session_state.df_rooms["Phòng"] == room_num]["Bảo trì"].values[0]
+                if is_maint:
+                    st.error(f"Phòng {room_num} đang bị KHÓA BẢO TRÌ! Vui lòng đổi phòng cho khách trước khi check-in.")
+                else:
+                    st.session_state.df_bookings.loc[st.session_state.df_bookings["Mã Đặt"] == selected_bk, "Trạng thái BK"] = "Đang ở"
+                    st.session_state.df_rooms.loc[st.session_state.df_rooms["Phòng"] == room_num, "Trạng thái"] = "Đang ở"
+                    save_all_data()
+                    st.success(f"Check-in thành công cho khách {bk_row['Khách hàng']} - Phòng {room_num}!")
+                    st.rerun()
+        else:
+            st.info("Không có booking nào đang chờ check-in.")
+
+    with tab_out:
+        st.subheader("Danh sách khách đang lưu trú")
+        active_bk = st.session_state.df_bookings[st.session_state.df_bookings["Trạng thái BK"] == "Đang ở"]
+
+        if not active_bk.empty:
+            selected_out_bk = st.selectbox("Chọn Booking làm thủ tục Check-out:", active_bk["Mã Đặt"].tolist())
+            bk_data = active_bk[active_bk["Mã Đặt"] == selected_out_bk].iloc[0]
+
+            col_a, col_b = st.columns(2)
+            with col_a:
+                st.write(f"**Khách hàng:** {bk_data['Khách hàng']}")
+                st.write(f"**Phòng:** {bk_data['Phòng']}")
+                st.write(f"**Tiền phòng:** {bk_data['Tiền phòng']:,} VNĐ")
+                st.write(f"**Tiền đặt cọc:** {bk_data['Tiền Cọc']:,} VNĐ")
+
+            with col_b:
+                st.subheader("Thêm Phụ Phí Dịch Vụ (Minibar, F&B, Spa...)")
+                service_fee = st.number_input("Tiền dịch vụ phát sinh (VNĐ):", min_value=0, step=10000, value=int(bk_data['Tiền Dịch vụ']))
+                pay_method = st.selectbox("Phương thức thanh toán:", ["Tiền mặt", "Thẻ ngân hàng", "Chuyển khoản QR"])
+
+            # Tính toán tổng thực thanh toán
+            total_bill = (bk_data['Tiền phòng'] + service_fee) - bk_data['Tiền Cọc']
+            st.markdown(f"### 💰 **CÒN PHẢI THANH TOÁN: {total_bill:,.0f} VNĐ**")
+
+            if st.button("🧾 Hoàn Tất Check-out & In Hóa Đơn"):
+                room_num = bk_data["Phòng"]
+
+                # Cập nhật trạng thái
+                st.session_state.df_bookings.loc[st.session_state.df_bookings["Mã Đặt"] == selected_out_bk, "Tiền Dịch vụ"] = service_fee
+                st.session_state.df_bookings.loc[st.session_state.df_bookings["Mã Đặt"] == selected_out_bk, "Tổng cộng"] = bk_data['Tiền phòng'] + service_fee
+                st.session_state.df_bookings.loc[st.session_state.df_bookings["Mã Đặt"] == selected_out_bk, "Trạng thái BK"] = "Đã Check-out"
+                st.session_state.df_bookings.loc[st.session_state.df_bookings["Mã Đặt"] == selected_out_bk, "PT Thanh toán"] = pay_method
+
+                # Chuyển trạng thái phòng sang Cần dọn (Dirty) cho Housekeeping
+                st.session_state.df_rooms.loc[st.session_state.df_rooms["Phòng"] == room_num, "Trạng thái"] = "Cần dọn (Dirty)"
+
+                save_all_data()
+                st.success(f"Đã Check-out thành công cho phòng {room_num}. Phòng đã tự động chuyển sang trạng thái Cần dọn (Dirty)!")
+                st.rerun()
+        else:
+            st.info("Hiện không có phòng nào đang ở cần check-out.")
+
+# ---------------------------------------------------------
+# MODULE 4: QUẢN LÝ KHÁCH HÀNG
+# ---------------------------------------------------------
+elif page == "4. Quản Lý Khách Hàng":
+    st.title("👤 Quản Lý Hồ Sơ Khách Hàng & Lịch Sử Lưu Trú")
+
+    df_g = st.session_state.df_guests
+    st.dataframe(df_g, use_container_width=True)
+
+    st.markdown("---")
+    st.subheader("🔍 Tra cứu & Cập nhật sở thích khách hàng")
+    selected_guest_id = st.selectbox("Chọn khách hàng (theo CCCD/Passport):", df_g["CCCD/Passport"].tolist())
+
+    if selected_guest_id:
+        g_data = df_g[df_g["CCCD/Passport"] == selected_guest_id].iloc[0]
+        new_pref = st.text_area("Cập nhật Sở thích / Yêu cầu đặc biệt:", value=str(g_data["Sở thích/Yêu cầu"]))
+        new_type = st.selectbox("Hạng khách hàng:", ["Khách lẻ", "Khách quen", "Đoàn", "VIP"], index=["Khách lẻ", "Khách quen", "Đoàn", "VIP"].index(g_data["Loại khách"]))
+
+        if st.button("Lưu Hồ Sơ Khách Hàng"):
+            st.session_state.df_guests.loc[st.session_state.df_guests["CCCD/Passport"] == selected_guest_id, "Sở thích/Yêu cầu"] = new_pref
+            st.session_state.df_guests.loc[st.session_state.df_guests["CCCD/Passport"] == selected_guest_id, "Loại khách"] = new_type
+            save_all_data()
+            st.success("Đã cập nhật thông tin hồ sơ khách hàng thành công!")
+            st.rerun()
+
+# ---------------------------------------------------------
+# MODULE 5: BUỒNG PHÒNG (HOUSEKEEPING)
+# ---------------------------------------------------------
+elif page == "5. Buồng Phòng (Housekeeping)":
+    st.title("🧹 Phân Hệ Buồng Phòng (Housekeeping)")
+
+    df_r = st.session_state.df_rooms
+    st.subheader("📌 Tình trạng vệ sinh buồng phòng")
+
+    def highlight_clean(val):
+        color_map = {
+            "Trống - Sạch": "background-color: #d4edda; color: #155724;",
+            "Cần dọn (Dirty)": "background-color: #f8d7da; color: #721c24;",
+            "Đang dọn (Cleaning)": "background-color: #fff3cd; color: #856404;",
+            "Đã kiểm tra (Inspected)": "background-color: #d1ecf1; color: #0c5460;",
+            "Đang ở": "background-color: #cce5ff; color: #004085;"
         }
-
-        Selected_label = st.selectbox(
-            “Chọn booking”,
-            List(booking_options.keys())
-        )
-
-        Booking_id = booking_options[selected_label]
-
-        Booking = bookings[
-            Bookings[“id”] == booking_id
-        ].iloc[0]
-
-        St.divider()
-
-        Col1, col2, col3 = st.columns(3)
-
-        Col1.metric(
-            “ Khách”,
-            Booking[“guest_name”]
-        )
-
-        Col2.metric(
-            “️ Phòng”,
-            Booking[“room_number”]
-        )
-
-        Col3.metric(
-            “ Tiền phòng”,
-            Format_money(booking[“total_amount”])
-        )
-
-        St.write(
-            F”**Thời gian:** {booking[‘check_in’]} → “
-            F”{booking[‘check_out’]}”
-        )
-
-        If st.button(
-            “✅ Xác nhận Check-in”,
-            Use_container_width=True,
-            Type=”primary”
-        ):
-
-            Execute_query(“””
-                UPDATE bookings
-                SET status = ‘Đang ở’
-                WHERE id = ?
-            “””, (booking_id,))
-
-            Update_room_status(
-                Booking[“room_number”],
-                “Đang ở”
-            )
-
-            Add_history(
-                Booking[“room_number”],
-                “Check-in”,
-                Booking[“guest_name”],
-                Booking[“total_amount”]
-            )
-
-            St.success(
-                F”Check-in thành công cho {booking[‘guest_name’]}.”
-            )
-
-            St.rerun()
-
-
-# =========================================================
-# 5. CHECK-OUT
-# =========================================================
-
-Elif menu == “ Check-out”:
-
-    St.markdown(
-        ‘<div class=”main-title”> Check-out</div>’,
-        Unsafe_allow_html=True
-    )
-
-    Bookings = query_df(“””
-        SELECT *
-        FROM bookings
-        WHERE status = ‘Đang ở’
-        ORDER BY check_out
-    “””)
-
-    If len(bookings) == 0:
-
-        St.info(“Hiện không có khách đang lưu trú.”)
-
-    Else:
-
-        Booking_options = {
-            F”#{row[‘id’]} – {row[‘guest_name’]} – Phòng {row[‘room_number’]}”:
-            Row[“id”]
-            For _, row in bookings.iterrows()
-        }
-
-        Selected_label = st.selectbox(
-            “Chọn khách trả phòng”,
-            List(booking_options.keys())
-        )
-
-        Booking_id = booking_options[selected_label]
-
-        Booking = bookings[
-            Bookings[“id”] == booking_id
-        ].iloc[0]
-
-        St.divider()
-
-        Col1, col2, col3 = st.columns(3)
-
-        Col1.metric(
-            “ Khách hàng”,
-            Booking[“guest_name”]
-        )
-
-        Col2.metric(
-            “️ Phòng”,
-            Booking[“room_number”]
-        )
-
-        Col3.metric(
-            “ Tiền phòng”,
-            Format_money(booking[“total_amount”])
-        )
-
-        St.write(
-            F”**Check-in:** {booking[‘check_in’]}”
-        )
-
-        St.write(
-            F”**Check-out dự kiến:** {booking[‘check_out’]}”
-        )
-
-        St.divider()
-
-        St.subheader(“ Thanh toán”)
-
-        Col1, col2 = st.columns(2)
-
-        With col1:
-            Room_charge = st.number_input(
-                “Tiền phòng”,
-                Min_value=0,
-                Value=int(booking[“total_amount”]),
-                Step=50000
-            )
-
-        With col2:
-            Extra_charge = st.number_input(
-                “Phụ thu / dịch vụ”,
-                Min_value=0,
-                Value=0,
-                Step=50000
-            )
-
-        Total_payment = room_charge + extra_charge
-
-        St.success(
-            F”### Tổng thanh toán: {format_money(total_payment)}”
-        )
-
-        If st.button(
-            “ Xác nhận Check-out”,
-            Use_container_width=True,
-            Type=”primary”
-        ):
-
-            Execute_query(“””
-                UPDATE bookings
-                SET
-                    Status = ‘Đã trả phòng’,
-                    Total_amount = ?
-                WHERE id = ?
-            “””, (
-                Total_payment,
-                Booking_id
-            ))
-
-            # Sau checkout chuyển sang trạng thái đang dọn
-            Update_room_status(
-                Booking[“room_number”],
-                “Đang dọn”
-            )
-
-            Add_history(
-                Booking[“room_number”],
-                “Check-out”,
-                Booking[“guest_name”],
-                Total_payment
-            )
-
-            St.success(
-                F”Check-out thành công. “
-                F”Phòng {booking[‘room_number’]} chuyển sang trạng thái Đang dọn.”
-            )
-
-            St.rerun()
-
-
-# =========================================================
-# 6. BẢO TRÌ
-# =========================================================
-
-Elif menu == “ Bảo trì phòng”:
-
-    St.markdown(
-        ‘<div class=”main-title”> Quản lý bảo trì</div>’,
-        Unsafe_allow_html=True
-    )
-
-    Rooms_df = query_df(“””
-        SELECT *
-        FROM rooms
-        WHERE status = ‘Bảo trì’
-        ORDER BY room_number
-    “””)
-
-    St.subheader(
-        F” Đang bảo trì: {len(rooms_df)} phòng”
-    )
-
-    If len(rooms_df) > 0:
-
-        St.dataframe(
-            Rooms_df[
-                [
-                    “room_number”,
-                    “room_type”,
-                    “floor”,
-                    “price”,
-                    “status”,
-                    “note”
-                ]
-            ].rename(columns={
-                “room_number”: “Phòng”,
-                “room_type”: “Loại phòng”,
-                “floor”: “Tầng”,
-                “price”: “Giá/đêm”,
-                “status”: “Trạng thái”,
-                “note”: “Ghi chú”
-            }),
-            Use_container_width=True,
-            Hide_index=True
-        )
-
-        Room_to_release = st.selectbox(
-            “Chọn phòng hoàn tất bảo trì”,
-            Rooms_df[“room_number”].tolist()
-        )
-
-        If st.button(
-            “✅ Hoàn tất bảo trì”,
-            Use_container_width=True
-        ):
-
-            Update_room_status(
-                Room_to_release,
-                “Trống”
-            )
-
-            Add_history(
-                Room_to_release,
-                “Hoàn tất bảo trì”
-            )
-
-            St.success(
-                F”Phòng {room_to_release} đã trở lại trạng thái Trống.”
-            )
-
-            St.rerun()
-
-    Else:
-
-        St.success(“ Hiện không có phòng nào đang bảo trì.”)
-
-    St.divider()
-
-    St.subheader(“ Đưa phòng vào bảo trì”)
-
-    Available_rooms = query_df(“””
-        SELECT *
-        FROM rooms
-        WHERE status IN (‘Trống’, ‘Đang dọn’)
-        ORDER BY room_number
-    “””)
-
-    If len(available_rooms) > 0:
-
-        Room_number = st.selectbox(
-            “Chọn phòng”,
-            Available_rooms[“room_number”].tolist()
-        )
-
-        Maintenance_note = st.text_area(
-            “Nội dung bảo trì”,
-            Placeholder=”Ví dụ: Máy lạnh không hoạt động...”
-        )
-
-        If st.button(
-            “ Đưa vào bảo trì”,
-            Use_container_width=True
-        ):
-
-            Execute_query(“””
-                UPDATE rooms
-                SET
-                    Status = ‘Bảo trì’,
-                    Note = ?
-                WHERE room_number = ?
-            “””, (
-                Maintenance_note,
-                Room_number
-            ))
-
-            Add_history(
-                Room_number,
-                F”Đưa vào bảo trì: {maintenance_note}”
-            )
-
-            St.success(
-                F”Phòng {room_number} đã chuyển sang Bảo trì.”
-            )
-
-            St.rerun()
-
-    Else:
-
-        St.info(
-            “Không có phòng phù hợp để đưa vào bảo trì.”
-        )
-
-
-# =========================================================
-# 7. LỊCH SỬ
-# =========================================================
-
-Elif menu == “ Lịch sử”:
-
-    St.markdown(
-        ‘<div class=”main-title”> Lịch sử hoạt động</div>’,
-        Unsafe_allow_html=True
-    )
-
-    History_df = query_df(“””
-        SELECT
-            Id AS ‘Mã’,
-            Room_number AS ‘Phòng’,
-            Action AS ‘Hoạt động’,
-            Guest_name AS ‘Khách hàng’,
-            Amount AS ‘Số tiền’,
-            Action_time AS ‘Thời gian’
-        FROM history
-        ORDER BY id DESC
-    “””)
-
-    If len(history_df) > 0:
-
-        St.dataframe(
-            History_df,
-            Use_container_width=True,
-            Hide_index=True
-        )
-
-        St.divider()
-
-        St.subheader(“ Thống kê hoạt động”)
-
-        Action_count = history_df[“Hoạt động”].value_counts()
-
-        St.bar_chart(action_count)
-
-    Else:
-
-        St.info(“Chưa có lịch sử hoạt động.”)
-
-
-# =========================================================
-# FOOTER
-# =========================================================
-
-St.markdown(“””
-<div class=”footer”>
-     Hotel Room Management System
-    <br>
-    Web App quản lý phòng khách sạn
-    <br>
-    Built with Streamlit + SQLite
-</div>
-“””, unsafe_allow_html=True)
+        return color_map.get(val, "")
+
+    st.dataframe(df_r[["Phòng", "Hạng", "Trạng thái", "Bảo trì", "Ghi chú"]].style.map(highlight_clean, subset=["Trạng thái"]), use_container_width=True)
+
+    st.markdown("---")
+    st.subheader("🔄 Cập nhật tình trạng dọn phòng (Cập nhật trực tiếp cho FO)")
+
+    col_hk1, col_hk2 = st.columns(2)
+    with col_hk1:
+        hk_room = st.selectbox("Chọn phòng xử lý:", df_r["Phòng"].tolist())
+        hk_status = st.selectbox("Trạng thái vệ sinh mới:", ["Trống - Sạch", "Đang dọn (Cleaning)", "Đã kiểm tra (Inspected)", "Cần dọn (Dirty)"])
+        hk_note = st.text_input("Ghi chú vệ sinh / Đồ đạc thất lạc:")
+
+    with col_hk2:
+        if st.button("💾 Cập nhật & Báo cho Lễ Tân (FO)"):
+            st.session_state.df_rooms.loc[st.session_state.df_rooms["Phòng"] == hk_room, "Trạng thái"] = hk_status
+            st.session_state.df_rooms.loc[st.session_state.df_rooms["Phòng"] == hk_room, "Ghi chú"] = hk_note
+
+            # Gửi thông báo nội bộ
+            new_not = {
+                "Thời gian": datetime.now().strftime("%Y-%m-%d %H:%M"),
+                "Từ bộ phận": "Housekeeping", "Đến bộ phận": "Front Office",
+                "Nội dung": f"Phòng {hk_room} đã chuyển trạng thái thành: {hk_status}", "Đã xử lý": False
+            }
+            st.session_state.df_notices = pd.concat([st.session_state.df_notices, pd.DataFrame([new_not])], ignore_index=True)
+
+            save_all_data()
+            st.success(f"Đã cập nhật trạng thái phòng {hk_room} và gửi thông báo tới Lễ Tân!")
+            st.rerun()
+
+# ---------------------------------------------------------
+# MODULE 6: QUẢN LÝ BẢO TRÌ (ENGINEERING)
+# ---------------------------------------------------------
+elif page == "6. Quản Lý Bảo Trì":
+    st.title("🛠️ Quản Lý Bảo Trì & Sự Cố Phòng (Out of Order)")
+
+    df_r = st.session_state.df_rooms
+
+    col_maint1, col_maint2 = st.columns(2)
+
+    with col_maint1:
+        st.subheader("🚨 Báo sự cố & Khóa phòng khỏi hệ thống bán")
+        maint_room = st.selectbox("Chọn phòng sự cố:", df_r["Phòng"].tolist())
+        error_desc = st.selectbox("Thiết bị sự cố:", ["Hư hỏng máy lạnh", "Lỗi TV/Wifi", "Hệ thống nước nóng", "Điện/Bóng đèn", "Khác"])
+        error_detail = st.text_area("Chi tiết lỗi hư hỏng:")
+
+        if st.button("🔒 Khóa Phòng & Báo Bảo Trì"):
+            st.session_state.df_rooms.loc[st.session_state.df_rooms["Phòng"] == maint_room, "Bảo trì"] = True
+            st.session_state.df_rooms.loc[st.session_state.df_rooms["Phòng"] == maint_room, "Trạng thái"] = "Khóa bảo trì"
+            st.session_state.df_rooms.loc[st.session_state.df_rooms["Phòng"] == maint_room, "Lỗi bảo trì"] = f"{error_desc}: {error_detail}"
+
+            save_all_data()
+            st.warning(f"Đã KHÓA phòng {maint_room} thành công! Lễ tân sẽ không thể gắn phòng này cho khách.")
+            st.rerun()
+
+    with col_maint2:
+        st.subheader("✅ Mở khóa phòng (Đã sửa chữa xong)")
+        locked_rooms = df_r[df_r["Bảo trì"] == True]["Phòng"].tolist()
+
+        if locked_rooms:
+            unlock_room = st.selectbox("Chọn phòng đã sửa xong:", locked_rooms)
+            if st.button("🔓 Sửa xong & Mở bán lại phòng"):
+                st.session_state.df_rooms.loc[st.session_state.df_rooms["Phòng"] == unlock_room, "Bảo trì"] = False
+                st.session_state.df_rooms.loc[st.session_state.df_rooms["Phòng"] == unlock_room, "Trạng thái"] = "Cần dọn (Dirty)"
+                st.session_state.df_rooms.loc[st.session_state.df_rooms["Phòng"] == unlock_room, "Lỗi bảo trì"] = ""
+
+                save_all_data()
+                st.success(f"Đã mở khóa phòng {unlock_room}! Phòng chuyển sang trạng thái Cần dọn để HK kiểm tra.")
+                st.rerun()
+        else:
+            st.info("Hiện không có phòng nào bị khóa bảo trì.")
+
+# ---------------------------------------------------------
+# MODULE 7: BÁO CÁO & THỐNG KÊ KPI
+# ---------------------------------------------------------
+elif page == "7. Báo Cáo & Thống Kê KPI":
+    st.title("📊 Báo Cáo Doanh Thu & Thống Kê Chỉ Số KPI Khách Sạn")
+
+    if role != "Quản Lý (Manager / Admin)":
+        st.warning("⚠️ Chỉ tài khoản Quản Lý (Manager / Admin) mới có quyền truy cập báo cáo doanh thu chi tiết.")
+    else:
+        df_bk = st.session_state.df_bookings
+        df_r = st.session_state.df_rooms
+
+        # Tính toán các chỉ số KPI chuẩn quản lý khách sạn
+        total_rooms = len(df_r)
+        occupied_rooms = len(df_r[df_r["Trạng thái"] == "Đang ở"])
+        occupancy_rate = (occupied_rooms / total_rooms) * 100 if total_rooms > 0 else 0
+
+        completed_bk = df_bk[df_bk["Trạng thái BK"] != "Đã hủy"]
+        total_revenue = completed_bk["Tổng cộng"].sum() if not completed_bk.empty else 0
+        total_nights = completed_bk["Số đêm"].sum() if not completed_bk.empty else 0
+
+        adr = (total_revenue / total_nights) if total_nights > 0 else 0
+        revpar = (total_revenue / total_rooms) if total_rooms > 0 else 0
+
+        # Hiển thị Metric KPI
+        kpi1, kpi2, kpi3, kpi4 = st.columns(4)
+        kpi1.metric("Công suất phòng (Occupancy)", f"{occupancy_rate:.1f}%")
+        kpi2.metric("Tổng doanh thu", f"{total_revenue:,.0f} VNĐ")
+        kpi3.metric("ADR (Giá TB / Đêm)", f"{adr:,.0f} VNĐ")
+        kpi4.metric("RevPAR (Doanh thu / Phòng sẵn có)", f"{revpar:,.0f} VNĐ")
+
+        st.markdown("---")
+        col_chart1, col_chart2 = st.columns(2)
+
+        with col_chart1:
+            st.subheader("📈 Doanh thu theo nguồn đặt (Channel)")
+            if not completed_bk.empty:
+                fig_source = px.pie(completed_bk, names="Nguồn đặt", values="Tổng cộng", hole=0.4, title="Tỷ trọng doanh thu theo OTA")
+                st.plotly_chart(fig_source, use_container_width=True)
+
+        with col_chart2:
+            st.subheader("📊 Tỷ lệ trạng thái phòng hiện tại")
+            fig_status = px.bar(df_r, x="Phòng", y="Giá", color="Trạng thái", title="Giá & Trạng thái từng phòng")
+            st.plotly_chart(fig_status, use_container_width=True)
+
+# ---------------------------------------------------------
+# MODULE 8: THÔNG BÁO NỘI BỘ
+# ---------------------------------------------------------
+elif page == "8. Thông Báo Nội Bộ":
+    st.title("📢 Phối Hợp & Thông Báo Nội Bộ")
+
+    col_n1, col_n2 = st.columns([1, 1.5])
+
+    with col_n1:
+        st.subheader("✉️ Gửi thông báo mới")
+        to_dept = st.selectbox("Gửi tới bộ phận:", ["Front Office", "Housekeeping", "Engineering", "Toàn bộ"])
+        not_content = st.text_area("Nội dung ghi chú / Yêu cầu:")
+
+        if st.button("Gửi Thông Báo"):
+            new_note = {
+                "Thời gian": datetime.now().strftime("%Y-%m-%d %H:%M"),
+                "Từ bộ phận": role,
+                "Đến bộ phận": to_dept,
+                "Nội dung": not_content,
+                "Đã xử lý": False
+            }
+            st.session_state.df_notices = pd.concat([st.session_state.df_notices, pd.DataFrame([new_note])], ignore_index=True)
+            save_all_data()
+            st.success("Đã gửi thông báo nội bộ!")
+            st.rerun()
+
+    with col_n2:
+        st.subheader("📋 Nhật ký thông báo nội bộ")
+        st.dataframe(st.session_state.df_notices, use_container_width=True)
