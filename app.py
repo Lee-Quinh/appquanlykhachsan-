@@ -3,7 +3,7 @@ from datetime import datetime, date, timedelta
 import pandas as pd
 import streamlit as st
 import plotly.express as px
-st.i"12.
+st.image("IMG_20260928_114620.jpg")
 # ---------------------------------------------------------
 # 1. CẤU HÌNH TRANG WEB STREAMLIT
 # ---------------------------------------------------------
